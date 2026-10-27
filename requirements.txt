@@ -1,0 +1,4 @@
+yt-dlp
+transkun
+setuptools<81  # transkun 이 pkg_resources 를 쓴다
+pretty_midi

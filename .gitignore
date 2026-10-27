@@ -1,0 +1,12 @@
+# 곡 파일·음원·변환 결과는 올리지 않는다 (커버 영상의 권리는 원곡자·연주자에게 있다)
+data/
+out/
+songs/
+*.pcsong
+*.wav
+*.mp3
+*.mid
+
+.venv/
+__pycache__/
+.DS_Store

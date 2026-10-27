@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piano Cover Preview</title>
+<style>
+  :root { --bg:#111; --fg:#ddd; --right:#f39c3d; --left:#3d8ef3; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px system-ui,sans-serif; }
+  body { display:flex; flex-direction:column; }
+  #bar { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; padding:8px 12px; }
+  #bar button, #bar select { font:inherit; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#222; color:var(--fg); }
+  #bar button.on { background:#444; border-color:#aaa; }
+  #seek { flex:1; min-width:160px; }
+  canvas { flex:1; width:100%; min-height:0; display:block; }
+  .r { color:var(--right) } .l { color:var(--left) }
+  #status { color:#888 }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="play" disabled>▶ 재생</button>
+  <span id="time">0:00</span>
+  <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
+  <label>모델 <select id="model"></select></label>
+  <label>소리 <select id="mix">
+    <option value="orig">원음</option><option value="midi">변환음</option><option value="both">같이</option>
+  </select></label>
+  <button id="hr" class="on r">오른손</button>
+  <button id="hl" class="on l">왼손</button>
+  <label>길이 <select id="len"><option value="key">누른 길이</option><option value="pedal">페달 포함</option></select></label>
+  <label>속도 <select id="rate"><option>1</option><option>0.75</option><option>0.5</option></select></label>
+  <label>싱크 <input id="offset" type="range" min="-300" max="300" step="10" value="0" style="width:90px"> <span id="offv">0ms</span></label>
+  <span id="status">불러오는 중…</span>
+</div>
+<canvas id="c"></canvas>
+<script>
+const MODELS = /*NOTES*/{};          // {모델: [[start, 누른 끝, pitch, velocity, hand(0=오른손,1=왼손), 페달 포함 끝], ...]} start 순
+const LOOKAHEAD = 3;                  // 막대가 화면 위끝에서 건반까지 오는 데 걸리는 초
+const LO = 21, HI = 108;              // 88건반 A0~C8
+const isBlack = p => [1,3,6,8,10].includes(p % 12);
+const $ = id => document.getElementById(id);
+const cv = $('c'), g = cv.getContext('2d');
+
+let notes = Object.values(MODELS)[0] || [];
+for (const k of Object.keys(MODELS)) $('model').add(new Option(`${k} (${MODELS[k].length})`, k));
+
+// ── 오디오: 원음과 변환음을 AudioContext 시계 하나로 돌린다 ──
+const ac = new AudioContext();
+const master = new DynamicsCompressorNode(ac); master.connect(ac.destination);
+const origGain = new GainNode(ac), synthGain = new GainNode(ac, { gain: 0 });
+origGain.connect(master); synthGain.connect(master);
+const handGain = [new GainNode(ac), new GainNode(ac)];
+handGain.forEach(h => h.connect(synthGain));
+const buffers = {};
+let rate = 1, playing = false, songPos = 0, startCtx = 0, startSong = 0, src = null;
+let voices = [], schedIdx = 0, offsetMs = 0;
+const show = [true, true];
+let pedalLen = false;               // 막대 길이를 페달로 울리는 데까지 늘릴지
+
+Promise.all(['1', '0.75', '0.5'].map(r =>
+  fetch(`original_${r}.mp3`).then(x => x.arrayBuffer()).then(b => ac.decodeAudioData(b)).then(buf => buffers[r] = buf)
+)).then(() => { $('play').disabled = false; $('status').textContent = ''; });
+
+const duration = () => buffers['1'] ? buffers['1'].duration : 1;
+// 지금 귀에 들리는 곡 위치 = 스피커까지의 지연을 뺀 시각
+const latency = () => ac.outputLatency || ac.baseLatency || 0;
+const songNow = () => playing ? startSong + (ac.currentTime - latency() - startCtx) * rate : songPos;
+
+function scheduleSynth() {
+  const horizon = startSong + (ac.currentTime + 1 - startCtx) * rate;  // 1초 앞까지 예약
+  while (schedIdx < notes.length && notes[schedIdx][0] < horizon) {
+    const [s, keyEnd, p, v, h, pedEnd] = notes[schedIdx++], e = pedEnd;  // 소리는 늘 페달 포함 길이
+    if (s < startSong) continue;
+    const t0 = startCtx + (s - startSong) / rate, t1 = startCtx + (e - startSong) / rate;
+    const amp = 0.25 * (v / 127) ** 1.5, f = 440 * 2 ** ((p - 69) / 12);
+    const env = new GainNode(ac, { gain: 0 }); env.connect(handGain[h]);
+    env.gain.setValueAtTime(0, t0);
+    env.gain.linearRampToValueAtTime(amp, t0 + 0.005);
+    env.gain.setTargetAtTime(amp * 0.3, t0 + 0.005, 0.4);      // 피아노처럼 서서히 줄어듦
+    env.gain.setTargetAtTime(0, Math.max(t1, t0 + 0.01), 0.05); // 건반 뗌
+    for (const [type, mult, lvl] of [['triangle', 1, 1], ['sine', 2, 0.3]]) {
+      const o = new OscillatorNode(ac, { type, frequency: f * mult });
+      const lg = new GainNode(ac, { gain: lvl }); o.connect(lg); lg.connect(env);
+      o.start(t0); o.stop(t1 + 0.4);
+      voices.push([o, t1 + 0.4]);
+    }
+  }
+  voices = voices.filter(([, end]) => end > ac.currentTime);  // 끝난 소리는 목록에서 뺀다
+}
+
+function stopAll() {
+  if (src) { src.stop(); src = null; }
+  for (const [o] of voices) try { o.stop(); } catch {}
+  voices = [];
+}
+
+function start(at) {
+  stopAll();
+  songPos = Math.max(0, Math.min(at, duration()));
+  startSong = songPos; startCtx = ac.currentTime + 0.05;
+  src = new AudioBufferSourceNode(ac, { buffer: buffers[String(rate)] });
+  src.connect(origGain); src.start(startCtx, songPos / rate);
+  schedIdx = 0; playing = true; scheduleSynth();
+}
+
+function pause() { songPos = songNow(); playing = false; stopAll(); }
+
+// ── 그리기 ──
+const whites = []; for (let p = LO; p <= HI; p++) if (!isBlack(p)) whites.push(p);
+function keyX(p, W) {
+  const w = W / whites.length;
+  if (!isBlack(p)) return [whites.indexOf(p) * w, w];
+  return [whites.indexOf(p - 1) * w + w * 0.65, w * 0.7];
+}
+function resize() { cv.width = cv.clientWidth * devicePixelRatio; cv.height = cv.clientHeight * devicePixelRatio; }
+addEventListener('resize', resize); resize();
+
+function draw() {
+  if (playing) { scheduleSynth(); if (songNow() >= duration()) { pause(); songPos = 0; $('play').textContent = '▶ 재생'; } }
+  const W = cv.width, H = cv.height, kbH = Math.min(H * 0.16, W * 0.12), rollH = H - kbH;
+  const t = songNow() + offsetMs / 1000, px = rollH / LOOKAHEAD, gap = 2 * devicePixelRatio;
+  g.fillStyle = '#111'; g.fillRect(0, 0, W, H);
+  // 옥타브 안내선 (각 도)
+  g.fillStyle = '#222';
+  for (let p = 24; p <= HI; p += 12) g.fillRect(keyX(p, W)[0], 0, 1, rollH);
+  const active = new Map();
+  for (const [s, keyEnd, p, v, h, pedEnd] of notes) {
+    const e = pedalLen ? pedEnd : keyEnd;
+    if (s > t + LOOKAHEAD) break;
+    if (!show[h] || e < t) continue;
+    if (s <= t) active.set(p, h);
+    const [x, w] = keyX(p, W);
+    const yBot = Math.min(rollH, rollH - (s - t) * px), yTop = Math.max(0, rollH - (e - t) * px + gap);
+    g.globalAlpha = 0.55 + 0.45 * v / 127;
+    g.fillStyle = h ? (isBlack(p) ? '#2a6bc0' : '#3d8ef3') : (isBlack(p) ? '#c0741f' : '#f39c3d');
+    g.beginPath(); g.roundRect(x + 1, yTop, w - 2, Math.max(3, yBot - yTop), 3 * devicePixelRatio); g.fill();
+  }
+  g.globalAlpha = 1;
+  for (const black of [false, true]) for (let p = LO; p <= HI; p++) {
+    if (isBlack(p) !== black) continue;
+    const [x, w] = keyX(p, W), kh = black ? kbH * 0.62 : kbH;
+    g.fillStyle = active.has(p) ? (active.get(p) ? '#3d8ef3' : '#f39c3d') : black ? '#000' : '#eee';
+    g.fillRect(x + 0.5, rollH, w - 1, kh);
+    if (p === 60) { g.fillStyle = '#999'; g.fillRect(x + w / 2 - 2, rollH + kbH - 10, 4, 4); }  // 가운데 도
+  }
+  g.fillStyle = '#555'; g.fillRect(0, rollH - 1, W, 2);
+  $('seek').value = songNow() / duration();
+  const s = Math.max(0, songNow());
+  $('time').textContent = `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// ── 조작 ──
+$('play').onclick = async () => {
+  await ac.resume();
+  if (playing) { pause(); $('play').textContent = '▶ 재생'; }
+  else { start(songPos); $('play').textContent = '❚❚ 정지'; }
+};
+$('seek').oninput = e => { const at = e.target.value * duration(); playing ? start(at) : songPos = at; };
+$('model').onchange = e => { notes = MODELS[e.target.value]; if (playing) start(songNow()); };
+$('mix').onchange = e => {
+  const m = e.target.value;
+  origGain.gain.value = m === 'midi' ? 0 : 1;
+  synthGain.gain.value = m === 'orig' ? 0 : 1;
+};
+$('hr').onclick = () => { show[0] = !show[0]; handGain[0].gain.value = +show[0]; $('hr').classList.toggle('on'); };
+$('hl').onclick = () => { show[1] = !show[1]; handGain[1].gain.value = +show[1]; $('hl').classList.toggle('on'); };
+$('rate').onchange = e => { const at = songNow(); rate = +e.target.value; playing ? start(at) : songPos = at; };
+$('len').onchange = e => { pedalLen = e.target.value === 'pedal'; };
+$('offset').oninput = e => { offsetMs = +e.target.value; $('offv').textContent = `${offsetMs}ms`; };
+</script>
+</body>
+</html>

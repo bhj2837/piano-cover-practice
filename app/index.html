@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>피아노 커버 연습</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 곡 목록 -->
+<section id="library">
+  <header class="lib-head">
+    <h1>피아노 커버 연습</h1>
+    <label class="btn primary">곡 불러오기<input id="import" type="file" hidden></label>
+  </header>
+  <p id="lib-msg" class="muted"></p>
+  <ul id="songs"></ul>
+  <p id="empty" class="muted" hidden>
+    아직 곡이 없어요.<br>
+    PC 에서 <code>python make_song.py &lt;유튜브 링크&gt;</code> 로 만든
+    <code>.pcsong</code> 파일을 폰으로 옮긴 뒤 「곡 불러오기」를 누르세요.
+  </p>
+</section>
+
+<!-- 연습 화면 -->
+<section id="player" hidden>
+  <div class="bars">
+  <div class="bar">
+    <button id="back" class="btn icon" aria-label="곡 목록">‹</button>
+    <button id="play" class="btn icon" aria-label="재생" disabled>▶</button>
+    <span id="time" class="num">0:00</span>
+    <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
+    <span id="title" class="title"></span>
+  </div>
+  <div class="bar">
+    <select id="rate" aria-label="속도"><option value="1">1배</option><option value="0.75">0.75배</option><option value="0.5">0.5배</option></select>
+    <button id="hr" class="btn on r">오른손</button>
+    <button id="hl" class="btn on l">왼손</button>
+    <select id="mix" aria-label="소리">
+      <option value="orig">원음</option><option value="midi">변환음</option><option value="both">같이</option><option value="none">소리 끔</option>
+    </select>
+    <button id="ab" class="btn">구간 A</button>
+    <button id="settings-btn" class="btn icon" aria-label="설정">⚙</button>
+  </div>
+  </div>
+  <div class="stage">
+    <canvas id="c"></canvas>
+    <div id="count" hidden></div>
+    <div id="loading">불러오는 중…</div>
+  </div>
+</section>
+
+<dialog id="settings">
+  <h2>설정</h2>
+  <label>막대 길이
+    <select id="len"><option value="key">누른 길이</option><option value="pedal">페달 포함</option></select>
+  </label>
+  <label>떨어지는 속도
+    <select id="fall"><option value="4">느리게 (4초)</option><option value="3">보통 (3초)</option><option value="2">빠르게 (2초)</option></select>
+  </label>
+  <label><input id="countin" type="checkbox"> 재생 전 3초 카운트다운</label>
+  <label>싱크 보정 <span id="offv" class="num">0ms</span>
+    <input id="offset" type="range" min="-300" max="300" step="10" value="0">
+  </label>
+  <p class="muted">블루투스 이어폰처럼 소리가 늦게 들리면 싱크를 + 쪽으로 옮기세요.</p>
+  <form method="dialog"><button class="btn primary">닫기</button></form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

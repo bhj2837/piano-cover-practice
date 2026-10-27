@@ -1,0 +1,56 @@
+:root {
+  --bg: #111; --panel: #1b1b1b; --line: #3a3a3a; --fg: #e6e6e6; --muted: #8a8a8a;
+  --right: #f39c3d; --left: #3d8ef3; --accent: #5b9bff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+[hidden] { display: none !important; }
+code { background: #222; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+.muted { color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; }
+
+.btn, select {
+  font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 12px; min-height: 38px; cursor: pointer;
+  white-space: nowrap; flex: none;
+}
+.btn.icon { min-width: 40px; padding: 7px 8px; font-size: 18px; line-height: 1; }
+.btn.on { background: #333; border-color: #9a9a9a; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn:disabled { opacity: .4; }
+.r { color: var(--right); } .l { color: var(--left); }
+.btn.on.r { border-color: var(--right); } .btn.on.l { border-color: var(--left); }
+
+/* 곡 목록 */
+#library { max-width: 640px; margin: 0 auto; padding: 16px; }
+.lib-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 { font-size: 20px; margin: 8px 0; }
+#songs { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 8px; }
+#songs li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; gap: 10px; align-items: center; }
+#songs .info { flex: 1; min-width: 0; cursor: pointer; }
+#songs .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#songs .sub { color: var(--muted); font-size: 13px; }
+
+/* 연습 화면 */
+#player { display: flex; flex-direction: column; height: 100%; }
+.bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; overflow-x: auto; flex: none; }
+#seek { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.title { color: var(--muted); font-size: 13px; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 폰을 눕히면 두 줄을 한 줄로 — 막대 볼 자리를 넓힌다 */
+@media (orientation: landscape) and (max-height: 500px) {
+  .bars { display: flex; }
+  .bars .bar:first-child { flex: 1; min-width: 0; }
+  .title { display: none; }
+}
+.stage { position: relative; flex: 1; min-height: 0; }
+canvas { width: 100%; height: 100%; display: block; touch-action: manipulation; }
+#count { position: absolute; inset: 0; display: grid; place-items: center; font-size: 96px; font-weight: 700; color: rgba(255,255,255,.85); pointer-events: none; }
+#loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+
+dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; width: min(92vw, 380px); }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+dialog h2 { margin: 0 0 12px; font-size: 17px; }
+dialog label { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0; }
+dialog input[type=range] { width: 100%; }
+dialog form { text-align: right; }
