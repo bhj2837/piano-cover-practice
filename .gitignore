@@ -10,3 +10,5 @@ songs/
 .venv/
 __pycache__/
 .DS_Store
+songs-repo/
+*.log

@@ -15,14 +15,23 @@
 <section id="library">
   <header class="lib-head">
     <h1>피아노 커버 연습</h1>
-    <label class="btn primary">곡 불러오기<input id="import" type="file" hidden></label>
+    <div class="row">
+      <label class="btn">파일<input id="import" type="file" hidden></label>
+      <button id="lib-settings" class="btn icon" aria-label="설정">⚙</button>
+    </div>
   </header>
+  <form id="link-form" class="row">
+    <input id="link" type="url" inputmode="url" placeholder="유튜브 링크 붙여넣기" autocomplete="off">
+    <button class="btn primary">변환</button>
+  </form>
+  <p id="link-msg" class="muted"></p>
+  <ul id="pending" class="list"></ul>
   <p id="lib-msg" class="muted"></p>
-  <ul id="songs"></ul>
+  <ul id="songs" class="list"></ul>
   <p id="empty" class="muted" hidden>
     아직 곡이 없어요.<br>
-    PC 에서 <code>python make_song.py &lt;유튜브 링크&gt;</code> 로 만든
-    <code>.pcsong</code> 파일을 폰으로 옮긴 뒤 「곡 불러오기」를 누르세요.
+    위 칸에 유튜브 링크를 넣거나, 유튜브 앱에서 「공유」 → 「커버 연습」을 고르세요.
+    처음 한 번은 ⚙ 설정에서 GitHub 토큰을 넣어야 해요.
   </p>
 </section>
 
@@ -67,6 +76,10 @@
     <input id="offset" type="range" min="-300" max="300" step="10" value="0">
   </label>
   <p class="muted">블루투스 이어폰처럼 소리가 늦게 들리면 싱크를 + 쪽으로 옮기세요.</p>
+  <h2>변환 저장소</h2>
+  <label>저장소 <input id="repo" type="text" autocomplete="off" spellcheck="false"></label>
+  <label>GitHub 토큰 <input id="token" type="password" autocomplete="off" placeholder="github_pat_…"></label>
+  <p class="muted">이 저장소 하나에만 Contents 읽기·쓰기 권한을 준 토큰을 넣으세요. 토큰은 이 기기에만 저장돼요.</p>
   <form method="dialog"><button class="btn primary">닫기</button></form>
 </dialog>
 

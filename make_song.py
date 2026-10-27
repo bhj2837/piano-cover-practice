@@ -86,27 +86,33 @@ def write_song(path, meta, audio):
             f.write(b)
 
 
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("url")
-    ap.add_argument("--out", type=Path, default=Path(__file__).parent / "songs")
-    a = ap.parse_args()
-    WORK.mkdir(exist_ok=True); a.out.mkdir(exist_ok=True)
-
-    print("1/4 음원 받는 중")
-    info, wav = download(a.url)
-    print("2/4 음표 인식 중 (transkun)")
+def make_song(url, out_dir, name=None, log=print):
+    """링크 하나를 곡 파일로 만든다. name 이 없으면 영상 제목을 파일 이름으로 쓴다"""
+    WORK.mkdir(exist_ok=True); out_dir.mkdir(parents=True, exist_ok=True)
+    log("1/4 음원 받는 중")
+    info, wav = download(url)
+    log("2/4 음표 인식 중 (transkun)")
     mid = WORK / f"{info['id']}_transkun.mid"
     raw = WORK / f"{info['id']}_transkun_raw.mid"
     if not raw.exists():
         transcribe.transcribe_transkun(wav, raw)
     transcribe.split_hands(raw, mid)
-    print("3/4 원음 속도별로 만드는 중")
+    log("3/4 원음 속도별로 만드는 중")
     audio = {r: encode_mp3(wav, r) for r in RATES}
-    print("4/4 곡 파일 쓰는 중")
-    meta = {"title": info["title"], "source": info.get("webpage_url", a.url),
+    log("4/4 곡 파일 쓰는 중")
+    meta = {"title": info["title"], "source": info.get("webpage_url", url),
             "duration": info.get("duration"), "notes": build_notes(mid)}
-    safe = re.sub(r'[\\/:*?"<>|]', "_", info["title"]).strip()[:80]
-    path = a.out / f"{safe}.pcsong"
+    if name is None:
+        name = re.sub(r'[\\/:*?"<>|]', "_", info["title"]).strip()[:80]
+    path = out_dir / f"{name}.pcsong"
     write_song(path, meta, audio)
-    print(f"완료: {path}  ({path.stat().st_size / 1e6:.1f}MB, 음 {len(meta['notes'])}개)")
+    log(f"완료: {path}  ({path.stat().st_size / 1e6:.1f}MB, 음 {len(meta['notes'])}개)")
+    return path
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("url")
+    ap.add_argument("--out", type=Path, default=Path(__file__).parent / "songs")
+    a = ap.parse_args()
+    make_song(a.url, a.out)

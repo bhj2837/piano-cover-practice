@@ -54,8 +54,13 @@ async function renderLibrary() {
     li.querySelector('.name').textContent = rec.title;
     li.querySelector('.info').onclick = () => openSong(rec.id);
     li.querySelector('button').onclick = async () => {
-      if (!confirm(`「${rec.title}」을(를) 이 기기에서 지울까요?`)) return;
-      await deleteSong(rec.id); renderLibrary();
+      if (!confirm(`「${rec.title}」을(를) 지울까요?`)) return;
+      await deleteSong(rec.id);
+      if (rec.remote) {  // 저장소에도 지운다. 안 지우면 다음 동기화 때 다시 받아 온다
+        dismissed.add(rec.remote); store.set('dismissed', [...dismissed]);
+        removeRemote(`songs/${rec.remote}`).catch(() => {});
+      }
+      renderLibrary();
     };
     return li;
   }));
@@ -75,6 +80,115 @@ $('import').onchange = async e => {
   }
   renderLibrary();
 };
+
+// ── 링크로 추가: 비공개 GitHub 저장소를 대기열로 쓴다 ──
+// 폰은 queue/<영상ID>.json 을 넣고, PC 의 worker.py 가 켜질 때 변환해 songs/<영상ID>.pcsong 을 올린다.
+// 저장소 구조는 worker.py 머리말 참고
+const server = Object.assign({ repo: 'bhj2837/piano-cover-songs', token: '' }, store.get('server', {}));
+const dismissed = new Set(store.get('dismissed', []));
+let pollTimer = null;
+
+async function api(path, { method = 'GET', body, raw = false } = {}) {
+  const r = await fetch(`https://api.github.com/repos/${server.repo}/contents/${path}`, {
+    method, cache: 'no-store',
+    headers: {
+      Authorization: `Bearer ${server.token}`,
+      Accept: raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json',
+    },
+    body: body && JSON.stringify(body),
+  });
+  if (r.status === 404) return null;
+  if (r.status === 401) throw new Error('토큰이 맞지 않아요. 설정에서 다시 넣어 주세요');
+  if (!r.ok) throw new Error(`GitHub 응답 ${r.status}`);
+  return r;
+}
+const listDir = async dir => { const r = await api(dir); return r ? r.json() : []; };
+const toBase64 = s => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+
+async function removeRemote(path) {
+  const r = await api(path);
+  if (r) await api(path, { method: 'DELETE', body: { message: `앱에서 지움 ${path}`, sha: (await r.json()).sha } });
+}
+
+function videoId(text) {
+  const m = String(text).match(/https?:\/\/\S+/);  // 유튜브 앱 공유는 "제목 + 링크" 로 온다
+  if (!m) return null;
+  try {
+    const u = new URL(m[0]);
+    const id = u.hostname.endsWith('youtu.be') ? u.pathname.slice(1)
+      : u.searchParams.get('v') || (u.pathname.match(/\/(?:shorts|live|embed)\/([\w-]+)/) || [])[1];
+    return /^[\w-]{11}$/.test(id || '') ? id : null;
+  } catch { return null; }
+}
+
+async function requestSong(text) {
+  const msg = $('link-msg');
+  const id = videoId(text);
+  if (!id) { msg.textContent = '유튜브 링크를 찾지 못했어요'; return; }
+  if (!server.token) { msg.textContent = '설정에서 GitHub 토큰을 먼저 넣어 주세요'; return; }
+  msg.textContent = '보내는 중…';
+  try {
+    if (await api(`songs/${id}.pcsong`)) { dismissed.delete(`${id}.pcsong`); store.set('dismissed', [...dismissed]); msg.textContent = '이미 변환된 곡이에요. 받아 올게요'; return syncSongs(); }
+    const body = { url: `https://www.youtube.com/watch?v=${id}`, requested: new Date().toISOString() };
+    const r = await fetch(`https://api.github.com/repos/${server.repo}/contents/queue/${id}.json`, {
+      method: 'PUT', headers: { Authorization: `Bearer ${server.token}` },
+      body: JSON.stringify({ message: `대기열 추가 ${id}`, content: toBase64(JSON.stringify(body)) }),
+    });
+    if (r.status === 422) msg.textContent = '이미 대기열에 있어요';
+    else if (!r.ok) throw new Error(`GitHub 응답 ${r.status}`);
+    else { msg.textContent = '대기열에 넣었어요. PC 가 켜져 있으면 1~2분 안에 곡이 생겨요'; $('link').value = ''; }
+  } catch (err) { msg.textContent = `보내지 못했어요: ${err.message}`; }
+  syncSongs();
+}
+
+let syncing = null;
+// 동시에 두 번 돌면 같은 곡을 두 번 받는다 — 돌고 있으면 그걸 기다린다
+const syncSongs = () => syncing || (syncing = doSync().finally(() => (syncing = null)));
+
+async function doSync() {
+  clearTimeout(pollTimer);
+  if (!server.token) { $('pending').replaceChildren(); return; }
+  try {
+    const [songs, queue, failed] = await Promise.all(['songs', 'queue', 'failed'].map(listDir));
+    const have = new Set((await listSongs()).map(r => r.remote).filter(Boolean));
+    for (const f of songs) {
+      if (!f.name.endsWith('.pcsong') || have.has(f.name) || dismissed.has(f.name)) continue;
+      $('lib-msg').textContent = `새 곡 받는 중… (${(f.size / 1e6).toFixed(1)}MB)`;
+      const blob = await (await api(f.path, { raw: true })).blob();
+      const meta = parseSong(await blob.arrayBuffer());
+      await putSong({ title: meta.title, duration: meta.duration, noteCount: meta.notes.length, blob, added: Date.now(), remote: f.name });
+      $('lib-msg').textContent = `「${meta.title}」이(가) 도착했어요.`;
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+    }
+    renderPending(queue, failed);
+    renderLibrary();
+    if (queue.length) pollTimer = setTimeout(syncSongs, 30000);  // 기다리는 곡이 있으면 30초마다 확인
+  } catch (err) {
+    $('lib-msg').textContent = `저장소를 확인하지 못했어요: ${err.message}`;
+  }
+}
+
+function renderPending(queue, failed) {
+  const items = [
+    ...queue.map(f => ({ id: f.name.replace('.json', ''), text: '변환 대기 중 · PC 가 켜지면 변환돼요' })),
+    ...failed.map(f => ({ id: f.name.replace('.json', ''), text: '변환 실패', path: f.path })),
+  ];
+  $('pending').replaceChildren(...items.map(it => {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="info"><div class="name"></div><div class="sub"></div></div>`;
+    li.querySelector('.name').textContent = `youtu.be/${it.id}`;
+    li.querySelector('.sub').textContent = it.text;
+    if (it.path) {
+      const b = document.createElement('button'); b.className = 'btn'; b.textContent = '지우기';
+      b.onclick = async () => { await removeRemote(it.path).catch(() => {}); syncSongs(); };
+      li.append(b);
+      api(it.path, { raw: true }).then(r => r && r.json()).then(j => { if (j) li.querySelector('.sub').textContent = `변환 실패 · ${j.error}`; }).catch(() => {});
+    }
+    return li;
+  }));
+}
+
+$('link-form').onsubmit = e => { e.preventDefault(); requestSong($('link').value); };
 
 // ── 연습 화면: 오디오 ──
 // 원음과 변환음을 AudioContext 시계 하나로 돌린다. 막대도 같은 시계를 본다
@@ -309,7 +423,12 @@ $('ab').onclick = () => {
 };
 
 // 설정
-$('settings-btn').onclick = () => $('settings').showModal();
+$('settings-btn').onclick = $('lib-settings').onclick = () => $('settings').showModal();
+$('repo').value = server.repo; $('token').value = server.token;
+$('repo').onchange = $('token').onchange = () => {
+  server.repo = $('repo').value.trim(); server.token = $('token').value.trim();
+  store.set('server', server); syncSongs();
+};
 $('len').value = prefs.len; $('fall').value = prefs.fall; $('countin').checked = prefs.countin;
 $('offset').value = prefs.offset; $('offv').textContent = `${prefs.offset}ms`;
 $('len').onchange = e => { prefs.len = e.target.value; savePrefs(); };
@@ -319,4 +438,18 @@ $('offset').oninput = e => { prefs.offset = +e.target.value; $('offv').textConte
 
 // ── 시작 ──
 renderLibrary();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+// 유튜브 앱 「공유」 → 이 앱 으로 들어오면 주소에 링크가 실려 온다 (manifest 의 share_target)
+const shared = new URLSearchParams(location.search);
+if (shared.has('share')) {
+  history.replaceState(null, '', location.pathname);
+  const text = `${shared.get('url') || ''} ${shared.get('text') || ''}`;
+  $('link').value = (text.match(/https?:\/\/\S+/) || [''])[0];  // 토큰이 없어 못 보내도 링크는 남겨 둔다
+  requestSong(text);
+} else syncSongs();
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !song) syncSongs(); });
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  // 새 판이 깔리면 한 번 새로 고친다 (연습 중이면 다음에)
+  const hadOld = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadOld && !song) location.reload(); });
+}
