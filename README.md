@@ -38,9 +38,11 @@ Windows:
 ```
 winget install Gyan.FFmpeg
 uv venv -p 3.11 .venv
-uv pip install -p .venv -r requirements.txt
+uv pip install -p .venv -r requirements.txt "ncls==0.0.68"
 .venv\Scripts\python make_song.py "https://www.youtube.com/watch?v=..."
 ```
+
+Windows 에서는 `ncls==0.0.68` 을 함께 지정합니다. transkun 이 쓰는 `ncls` 의 최신판(0.0.71)에는 Windows 용 wheel 이 없어서, Microsoft C++ Build Tools 가 없으면 설치가 실패합니다. 0.0.68 에는 Python 3.11 용 Windows wheel 이 있습니다(3.12 이상용은 없습니다). transkun 은 학습용 코드(`Data.py`)에서만 ncls 를 쓰므로 인식 결과에는 영향이 없습니다.
 
 macOS:
 
@@ -106,11 +108,25 @@ PC 에서는 `git` 이 그 저장소에 push 할 수 있어야 합니다(`gh aut
 .venv\Scripts\python worker.py --repo <계정>/piano-cover-songs --watch 60
 ```
 
-Windows 에서 로그인할 때 자동으로 띄우기(경로는 실제 위치로 바꿉니다):
+Windows 에서 로그인할 때 자동으로 띄우기(경로는 실제 위치로 바꿉니다).
+
+`pythonw.exe` 로 띄우면 worker 가 git, ffmpeg, yt-dlp 를 부를 때마다 콘솔 창이 새로 뜹니다. 그래서 숨긴 콘솔에서 `python.exe` 를 실행하는 스크립트를 거칩니다. 자식 프로세스는 그 숨긴 콘솔을 물려받아 창이 뜨지 않습니다. 다음 내용을 `run-worker.vbs` 로 저장합니다.
 
 ```
-schtasks /Create /TN piano-cover-worker /SC ONLOGON /TR "\"C:\경로\.venv\Scripts\pythonw.exe\" \"C:\경로\worker.py\" --watch 60"
+Set sh = CreateObject("WScript.Shell")
+sh.CurrentDirectory = "C:\경로"
+sh.Run """C:\경로\.venv\Scripts\python.exe"" ""C:\경로\worker.py"" --watch 60", 0, False
 ```
+
+PowerShell 에서 작업 스케줄러에 등록합니다. 관리자 권한은 필요 없습니다.
+
+```
+$action = New-ScheduledTaskAction -Execute wscript.exe -Argument '"C:\경로\run-worker.vbs"'
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+Register-ScheduledTask -TaskName piano-cover-worker -Action $action -Trigger $trigger
+```
+
+대기열이 비어 있는 동안에는 `worker.log` 에 아무것도 남지 않습니다. 지금 바로 띄우려면 `Start-ScheduledTask piano-cover-worker`, 자동 실행을 끄려면 `Disable-ScheduledTask piano-cover-worker` 를 실행합니다.
 
 macOS 에서는 `~/Library/LaunchAgents/` 에 `RunAtLoad` 와 `KeepAlive` 를 켠 plist 를 두고 같은 명령을 실행하게 합니다. 진행 기록은 `worker.log` 에 남습니다.
 
