@@ -60,7 +60,11 @@ let pedalLen = false;               // 막대 길이를 페달로 울리는 데�
 
 Promise.all(['1', '0.75', '0.5'].map(r =>
   fetch(`original_${r}.mp3`).then(x => x.arrayBuffer()).then(b => ac.decodeAudioData(b)).then(buf => buffers[r] = buf)
-)).then(() => { $('play').disabled = false; $('status').textContent = ''; });
+)).then(() => {
+  $('play').disabled = false; $('status').textContent = '';
+  const m = location.hash.match(/t=(\d+(?:\.\d+)?)/);  // 목록에서 #t=초 로 열면 그 1초 앞부터
+  if (m) songPos = Math.max(0, +m[1] - 1);
+});
 
 const duration = () => buffers['1'] ? buffers['1'].duration : 1;
 // 지금 귀에 들리는 곡 위치 = 스피커까지의 지연을 뺀 시각

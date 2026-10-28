@@ -1,6 +1,6 @@
 // 앱 화면 파일을 폰에 담아 두고 인터넷 없이도 연다.
 // 캐시에 있는 것을 먼저 보여 주고, 뒤에서 새 판을 받아 다음 실행 때 쓴다.
-const CACHE = 'pcp-v2';
+const CACHE = 'pcp-v3';
 const FILES = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

@@ -150,14 +150,18 @@ async function doSync() {
   if (!server.token) { $('pending').replaceChildren(); return; }
   try {
     const [songs, queue, failed] = await Promise.all(['songs', 'queue', 'failed'].map(listDir));
-    const have = new Set((await listSongs()).map(r => r.remote).filter(Boolean));
+    const have = new Map((await listSongs()).filter(r => r.remote).map(r => [r.remote, r]));
     for (const f of songs) {
-      if (!f.name.endsWith('.pcsong') || have.has(f.name) || dismissed.has(f.name)) continue;
-      $('lib-msg').textContent = `새 곡 받는 중… (${(f.size / 1e6).toFixed(1)}MB)`;
+      if (!f.name.endsWith('.pcsong') || dismissed.has(f.name)) continue;
+      // 같은 이름이라도 저장소 쪽 파일이 바뀌었으면(sha 가 다르면) 새 판으로 바꾼다. 연습 위치는 그대로
+      const old = have.get(f.name);
+      if (old && old.sha === f.sha) continue;
+      $('lib-msg').textContent = `${old ? '새 판' : '새 곡'} 받는 중… (${(f.size / 1e6).toFixed(1)}MB)`;
       const blob = await (await api(f.path, { raw: true })).blob();
       const meta = parseSong(await blob.arrayBuffer());
-      await putSong({ title: meta.title, duration: meta.duration, noteCount: meta.notes.length, blob, added: Date.now(), remote: f.name });
-      $('lib-msg').textContent = `「${meta.title}」이(가) 도착했어요.`;
+      await putSong({ ...(old || { added: Date.now() }), title: meta.title, duration: meta.duration,
+                      noteCount: meta.notes.length, blob, remote: f.name, sha: f.sha });
+      $('lib-msg').textContent = old ? `「${meta.title}」을(를) 새 판으로 바꿨어요.` : `「${meta.title}」이(가) 도착했어요.`;
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
     }
     renderPending(queue, failed);
