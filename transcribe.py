@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pretty_midi
 
-SPLIT_PITCH = 60  # 가운데 도(C4). 이 음 이상이면 오른손 — 첫 판은 고정 분할
+import hands
+
 MIN_DUR = 0.03    # 이보다 짧은 음은 인식 잡음으로 보고 버린다
 
 
@@ -42,15 +43,20 @@ def transcribe_bytedance(wav_path, raw_midi_path):
 MODELS = {"transkun": transcribe_transkun, "bytedance": transcribe_bytedance}
 
 
-def split_hands(raw_midi_path, out_path):
+def split_hands(raw_midi_path, out_path, method="track"):
+    """method: track = 손 위치 추적(hands.py), fixed = 가운데 도 고정 분할(첫 판, 비교용)"""
     src = pretty_midi.PrettyMIDI(str(raw_midi_path))
     notes = [n for inst in src.instruments for n in inst.notes]
     kept = [n for n in notes if n.end - n.start >= MIN_DUR]
+    if method == "fixed":
+        which = [0 if n.pitch >= 60 else 1 for n in kept]
+    else:
+        which = hands.assign_hands([(n.start, n.end, n.pitch) for n in kept])
     out = pretty_midi.PrettyMIDI()
     right = pretty_midi.Instrument(program=0, name="Right Hand")
     left = pretty_midi.Instrument(program=0, name="Left Hand")
-    for n in kept:
-        (right if n.pitch >= SPLIT_PITCH else left).notes.append(n)
+    for n, h in zip(kept, which):
+        (left if h else right).notes.append(n)
     # 서스테인 페달은 오른손 트랙에 둔다
     right.control_changes = [cc for inst in src.instruments for cc in inst.control_changes]
     out.instruments += [right, left]
