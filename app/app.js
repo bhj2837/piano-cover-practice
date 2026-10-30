@@ -252,7 +252,7 @@ setInterval(() => {
   scheduleSynth();
   const now = songNow();
   if (loopA != null && loopB != null && now >= loopB) start(loopA);
-  else if (now >= duration()) { pause(); songPos = 0; }
+  else if (now >= duration()) { pause(); songPos = 0; savePos(); }  // 끝 위치가 남으면 다음에 열 때 끝에서 시작한다
 }, 50);
 
 function stopAll() {
@@ -261,10 +261,18 @@ function stopAll() {
   voices = [];
 }
 
+// 처음 쓰는 속도는 원음을 해독하느라 시작이 늦다. 그 사이에 정지·다른 시작이 끼어들면
+// 늦게 끝난 시작은 버린다 (안 버리면 정지가 무시되고, 원음이 두 겹으로 울려 하나는 못 끈다)
+let startGen = 0, starting = false;
+
 async function start(at, countIn = false) {
-  stopAll();
+  const gen = ++startGen;
+  stopAll(); playing = false; starting = true;  // 기다리는 동안 위치는 songPos 로 보인다
+  songPos = Math.max(0, at);
   const buf = await decode(String(rate));
-  songPos = Math.max(0, Math.min(at, duration() - 0.1));
+  if (gen !== startGen) return;
+  starting = false;
+  songPos = Math.max(0, Math.min(songPos, duration() - 0.1));
   startSong = songPos;
   startCtx = ac.currentTime + (countIn ? 3 : 0.05);
   src = new AudioBufferSourceNode(ac, { buffer: buf });
@@ -274,14 +282,17 @@ async function start(at, countIn = false) {
 }
 
 function pause() {
+  startGen++;  // 아직 끝나지 않은 시작도 취소한다
+  if (starting) { starting = false; setPlayIcon(); savePos(); return; }
   if (!playing) return;
   songPos = Math.max(0, songNow()); playing = false; stopAll();
   setPlayIcon(); savePos();
 }
 
 function setPlayIcon() {
-  $('play').textContent = playing ? '❚❚' : '▶';
-  $('play').setAttribute('aria-label', playing ? '정지' : '재생');
+  const on = playing || starting;
+  $('play').textContent = on ? '❚❚' : '▶';
+  $('play').setAttribute('aria-label', on ? '정지' : '재생');
   if (playing && navigator.wakeLock && !wakeLock) {  // 연습 중 화면 꺼짐 방지
     navigator.wakeLock.request('screen').then(l => { wakeLock = l; l.onrelease = () => (wakeLock = null); }).catch(() => {});
   } else if (!playing && wakeLock) wakeLock.release();
@@ -291,7 +302,7 @@ const savePos = () => songId != null && store.set(`pos:${songId}`, songPos);
 
 async function togglePlay() {
   await ac.resume();
-  if (playing) pause();
+  if (playing || starting) pause();
   else start(songPos, prefs.countin);
 }
 
@@ -406,7 +417,7 @@ $('play').onclick = togglePlay;
 cv.onclick = () => { if (!$('play').disabled) togglePlay(); };  // 화면을 톡 치면 재생/정지
 $('seek').oninput = e => { const at = e.target.value * duration(); playing ? start(at) : (songPos = at); };
 $('seek').onchange = savePos;
-$('rate').onchange = e => { const at = Math.max(0, songNow()); rate = +e.target.value; playing ? start(at) : (songPos = at); };
+$('rate').onchange = e => { const at = Math.max(0, songNow()); rate = +e.target.value; playing || starting ? start(at) : (songPos = at); };
 $('mix').value = prefs.mix;
 $('mix').onchange = e => { prefs.mix = e.target.value; savePos(); savePrefs(); applyMix(); };
 applyMix();
