@@ -210,8 +210,9 @@ const show = [true, true];
 
 const duration = () => (buffers['1'] && buffers['1'].duration) || (song && song.duration) || 1;
 const latency = () => ac.outputLatency || ac.baseLatency || 0;
-// 지금 귀에 들리는 곡 위치. 카운트다운 중에는 시작점보다 작다
-const songNow = () => playing ? startSong + (ac.currentTime - latency() - startCtx) * rate : songPos;
+// 지금 귀에 들리는 곡 위치. 카운트다운 중에는 시작점에 멈춰 있다
+// (앞으로 당겨 보여 주면 다시 재생할 때 되감긴 것처럼 보이고, 그때 정지하면 실제로 그만큼 밀린다)
+const songNow = () => playing ? startSong + Math.max(0, ac.currentTime - latency() - startCtx) * rate : songPos;
 
 function decode(r) {
   if (!buffers[r]) buffers[r] = ac.decodeAudioData(song.audioBytes(r)).then(b => (buffers[r] = b));
